@@ -1,377 +1,421 @@
-import React, { useState, useRef } from 'react';
-import { Rotate3D, TriangleRight, Lightbulb, Image as ImageIcon, Target, Info, Eye, Camera, UserCircle } from 'lucide-react';
-
-export default function App() {
-  // --- 시뮬레이션 상태 ---
-  const [angle, setAngle] = useState(45); // 스크린 기울기 (20~70)
-  const [brightness, setBrightness] = useState(80); // 밝기 (0~100)
-  const [objectType, setObjectType] = useState('🦋'); // 홀로그램 종류
-  const [showRays, setShowRays] = useState(true); // 빛의 경로 표시 여부
-
-  // --- 관찰자 위치 상태 (새로 추가됨) ---
-  const [eyeY, setEyeY] = useState(240); // 눈의 거리 (Y축)
-  const [eyeZ, setEyeZ] = useState(120); // 눈의 높이 (Z축)
-
-  // --- 3D 화면 드래그 회전 상태 (XY 평면 기준) ---
-  const [rotX, setRotX] = useState(60); // 0: 위에서 내려다봄, 90: Z축을 정면에서 바라봄
-  const [rotZ, setRotZ] = useState(45); // 바닥(XY평면) 회전각
-  const [isDragging, setIsDragging] = useState(false);
-  const lastMousePos = useRef({ x: 0, y: 0 });
-
-  // 마우스/터치 드래그 이벤트 핸들러
-  const handlePointerDown = (e) => {
-    setIsDragging(true);
-    lastMousePos.current = { x: e.clientX || e.touches[0].clientX, y: e.clientY || e.touches[0].clientY };
-  };
-
-  const handlePointerMove = (e) => {
-    if (!isDragging) return;
-    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
-    const dx = clientX - lastMousePos.current.x;
-    const dy = clientY - lastMousePos.current.y;
-    
-    setRotZ((prev) => prev - dx * 0.5); // 좌우 드래그: 팽이처럼 바닥 회전
-    setRotX((prev) => Math.max(0, Math.min(95, prev + dy * 0.5))); // 상하 드래그: 시점 높낮이 조절
-    
-    lastMousePos.current = { x: clientX, y: clientY };
-  };
-
-  const handlePointerUp = () => setIsDragging(false);
-
-  // 시점 초기화 함수
-  const setViewFront = () => { setRotX(85); setRotZ(0); }; // Z축을 바라보는 시점
-  const setViewTop = () => { setRotX(60); setRotZ(45); };  // 대각선 위에서 보는 시점
-
-  // --- 물리적 수치 정의 ---
-  const HINGE_R = 20; // 피라미드 좁은 밑면이 닿는 중심으로부터의 거리
-  const IMG_R = 80;  // 바닥에 놓인 이미지의 중심 거리 (빛이 빗나가지 않도록 조정)
-  const FACE_H = 180; // 사다리꼴 스크린의 빗변 길이 (빛이 빗나가지 않도록 연장)
-  const isOptimal = angle === 45;
-
-  // --- 레이 트레이싱 (빛의 경로) 3D 좌표 계산 ---
-  const ang = angle * Math.PI / 180;
-  const D = IMG_R - HINGE_R;
-
-  // 1. 바닥 이미지 위치
-  const p_img = { x: 0, y: IMG_R, z: 0 }; 
-
-  // 2. 스크린에 빛이 부딪히는 지점 (바닥에서 수직으로 쏘아올려짐)
-  const p_s = { 
-    x: 0, 
-    y: IMG_R, 
-    z: D * Math.tan(ang) 
-  };
-
-  // 3. 홀로그램 허상 위치 (정확한 반사 법칙 적용)
-  const p_v = { 
-    x: 0, 
-    y: HINGE_R + D * Math.cos(2 * ang), 
-    z: D * Math.sin(2 * ang) 
-  };
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D 홀로그램 시뮬레이션</title>
   
-  // 4. 관찰자의 눈 (시선)
-  const p_eye = { x: 0, y: eyeY, z: eyeZ }; 
-
-  // 5. 반사된 빛의 방향 및 끝점 계산
-  const dir_y = p_s.y - p_v.y;
-  const dir_z = p_s.z - p_v.z;
-  const dir_len = Math.hypot(dir_y, dir_z);
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
   
-  const ray_length = 400; // 반사된 빛을 연장해서 그림
-  const p_reflect = {
-    x: 0,
-    y: p_s.y + (dir_y / dir_len) * ray_length,
-    z: p_s.z + (dir_z / dir_len) * ray_length
-  };
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel (JSX 컴파일용) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  // 6. 관찰자의 눈이 빛의 경로에 정확히 맞았는지 확인 (충돌 감지)
-  const u_y = dir_y / dir_len;
-  const u_z = dir_z / dir_len;
-  const w_y = eyeY - p_s.y;
-  const w_z = eyeZ - p_s.z;
-  const distToRay = Math.abs(w_y * u_z - w_z * u_y); 
-  const isForward = (w_y * u_y + w_z * u_z) > 0; 
-  const isEyeAligned = distToRay < 40 && isForward; 
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #020617; /* slate-950 */
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
 
-  // 3D 공간 상의 두 점을 연결하는 선(레이저) 그리기
-  const DrawLine = ({ p1, p2, type }) => {
-    const dx = p2.x - p1.x; const dy = p2.y - p1.y; const dz = p2.z - p1.z;
-    const len = Math.hypot(dx, dy, dz);
-    const rZ = Math.atan2(dy, dx) * 180 / Math.PI;
-    const rY = Math.atan2(dz, Math.hypot(dx, dy)) * 180 / Math.PI;
-    
-    const isVirtual = type === 'virtual';
-    const color = isVirtual ? '#06b6d4' : '#eab308';
+  <script type="text/babel">
+    const { useState, useRef } = React;
 
-    return (
-      <div style={{
-        position: 'absolute', left: 0, top: 0, width: len, height: isVirtual ? 2 : 4,
-        transformOrigin: 'left center',
-        transform: `translate3d(${p1.x}px, ${p1.y}px, ${p1.z}px) rotateZ(${rZ}deg) rotateY(${-rY}deg)`,
-        background: isVirtual 
-          ? `repeating-linear-gradient(90deg, transparent, transparent 4px, ${color} 4px, ${color} 8px)` 
-          : color,
-        boxShadow: isVirtual ? 'none' : `0 0 10px ${color}, 0 0 20px ${color}`,
-        opacity: brightness / 100, zIndex: 50, pointerEvents: 'none', overflow: 'hidden'
-      }}>
-        {!isVirtual && (
-           <div style={{
-             position: 'absolute', left: 0, top: -2, width: 20, height: '200%',
-             backgroundColor: '#ffffff', borderRadius: '50%',
-             boxShadow: '0 0 15px 5px rgba(255,255,255,1)',
-             animation: 'photonMove 1s infinite linear'
-           }} />
-        )}
-      </div>
-    );
-  };
+    // --- 외부 라이브러리(lucide-react) 아이콘을 단일 파일용 SVG 컴포넌트로 대체 ---
+    const Rotate3D = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16.466 7.5C15.643 4.237 13.952 2 12 2 9.239 2 7 6.477 7 12s2.239 10 5 10c.342 0 .677-.069 1-.2"/><path d="m15.194 13.707 3.814 1.86-1.86 3.814"/><path d="M19 15.57c-1.804.885-4.274 1.43-7 1.43-5.523 0-10-2.239-10-5s4.477-5 10-5c4.838 0 8.873 1.718 9.8 4"/></svg>;
+    const TriangleRight = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m9 18 6-6-6-6v12z" fill="currentColor"/></svg>;
+    const Lightbulb = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.9 1.2 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>;
+    const ImageIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>;
+    const Info = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>;
+    const Eye = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>;
+    const Camera = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>;
+    const UserCircle = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>;
 
-  return (
-    <div className="flex flex-col lg:flex-row h-screen w-full bg-slate-950 text-slate-100 select-none" style={{ fontFamily: '"Jua", sans-serif' }}>
-      <style>
-        {`
-          @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
-          @keyframes photonMove { 0% { left: -20px; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
-          .canvas-container:active { cursor: grabbing !important; }
-        `}
-      </style>
+    function App() {
+      // --- 시뮬레이션 상태 ---
+      const [angle, setAngle] = useState(45); // 스크린 기울기 (20~70)
+      const [brightness, setBrightness] = useState(80); // 밝기 (0~100)
+      const [objectType, setObjectType] = useState('🦋'); // 홀로그램 종류
+      const [showRays, setShowRays] = useState(true); // 빛의 경로 표시 여부
+
+      // --- 관찰자 위치 상태 (새로 추가됨) ---
+      const [eyeY, setEyeY] = useState(240); // 눈의 거리 (Y축)
+      const [eyeZ, setEyeZ] = useState(120); // 눈의 높이 (Z축)
+
+      // --- 3D 화면 드래그 회전 상태 (XY 평면 기준) ---
+      const [rotX, setRotX] = useState(60); // 0: 위에서 내려다봄, 90: Z축을 정면에서 바라봄
+      const [rotZ, setRotZ] = useState(45); // 바닥(XY평면) 회전각
+      const [isDragging, setIsDragging] = useState(false);
+      const lastMousePos = useRef({ x: 0, y: 0 });
+
+      // 마우스/터치 드래그 이벤트 핸들러
+      const handlePointerDown = (e) => {
+        setIsDragging(true);
+        lastMousePos.current = { x: e.clientX || e.touches[0].clientX, y: e.clientY || e.touches[0].clientY };
+      };
+
+      const handlePointerMove = (e) => {
+        if (!isDragging) return;
+        const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+        const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+        const dx = clientX - lastMousePos.current.x;
+        const dy = clientY - lastMousePos.current.y;
+        
+        setRotZ((prev) => prev - dx * 0.5); // 좌우 드래그: 팽이처럼 바닥 회전
+        setRotX((prev) => Math.max(0, Math.min(95, prev + dy * 0.5))); // 상하 드래그: 시점 높낮이 조절
+        
+        lastMousePos.current = { x: clientX, y: clientY };
+      };
+
+      const handlePointerUp = () => setIsDragging(false);
+
+      // 시점 초기화 함수
+      const setViewFront = () => { setRotX(85); setRotZ(0); }; // Z축을 바라보는 시점
+      const setViewTop = () => { setRotX(60); setRotZ(45); };  // 대각선 위에서 보는 시점
+
+      // --- 물리적 수치 정의 ---
+      const HINGE_R = 20; // 피라미드 좁은 밑면이 닿는 중심으로부터의 거리
+      const IMG_R = 80;  // 바닥에 놓인 이미지의 중심 거리 (빛이 빗나가지 않도록 조정)
+      const FACE_H = 180; // 사다리꼴 스크린의 빗변 길이 (빛이 빗나가지 않도록 연장)
+      const isOptimal = angle === 45;
+
+      // --- 레이 트레이싱 (빛의 경로) 3D 좌표 계산 ---
+      const ang = angle * Math.PI / 180;
+      const D = IMG_R - HINGE_R;
+
+      // 1. 바닥 이미지 위치
+      const p_img = { x: 0, y: IMG_R, z: 0 }; 
+
+      // 2. 스크린에 빛이 부딪히는 지점 (바닥에서 수직으로 쏘아올려짐)
+      const p_s = { 
+        x: 0, 
+        y: IMG_R, 
+        z: D * Math.tan(ang) 
+      };
+
+      // 3. 홀로그램 허상 위치 (정확한 반사 법칙 적용)
+      const p_v = { 
+        x: 0, 
+        y: HINGE_R + D * Math.cos(2 * ang), 
+        z: D * Math.sin(2 * ang) 
+      };
       
-      {/* 왼쪽: 3D 시뮬레이션 영역 */}
-      <div className="flex-1 p-4 flex flex-col items-center justify-center relative overflow-hidden">
-        <div className="absolute top-4 left-4 z-20 flex gap-2">
-          <button onClick={setViewFront} className="bg-slate-800 hover:bg-cyan-900 border border-slate-700 text-cyan-400 px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg transition-colors">
-            <Camera className="w-5 h-5" /> 정면(Z축)에서 보기
-          </button>
-          <button onClick={setViewTop} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg transition-colors">
-            <Rotate3D className="w-5 h-5" /> 대각선 초기 시점
-          </button>
-        </div>
+      // 4. 관찰자의 눈 (시선)
+      const p_eye = { x: 0, y: eyeY, z: eyeZ }; 
 
-        <div 
-          className="canvas-container relative w-full h-full max-h-[800px] max-w-5xl rounded-2xl shadow-2xl shadow-cyan-900/20 border-2 border-slate-800 bg-slate-900 flex items-center justify-center overflow-hidden cursor-grab" 
-          style={{ perspective: '1200px' }}
-          onMouseDown={handlePointerDown} onMouseMove={handlePointerMove} onMouseUp={handlePointerUp} onMouseLeave={handlePointerUp}
-          onTouchStart={handlePointerDown} onTouchMove={handlePointerMove} onTouchEnd={handlePointerUp}
-        >
-          {/* 🌐 World Container (XY 평면 기반) 🌐 */}
-          <div style={{ 
-            position: 'absolute', top: '50%', left: '50%', width: 0, height: 0,
-            transformStyle: 'preserve-3d',
-            transform: `rotateX(${rotX}deg) rotateZ(${rotZ}deg)`, // XY 바닥면 회전
-            transition: isDragging ? 'none' : 'transform 0.3s ease-out'
+      // 5. 반사된 빛의 방향 및 끝점 계산
+      const dir_y = p_s.y - p_v.y;
+      const dir_z = p_s.z - p_v.z;
+      const dir_len = Math.hypot(dir_y, dir_z);
+      
+      const ray_length = 400; // 반사된 빛을 연장해서 그림
+      const p_reflect = {
+        x: 0,
+        y: p_s.y + (dir_y / dir_len) * ray_length,
+        z: p_s.z + (dir_z / dir_len) * ray_length
+      };
+
+      // 6. 관찰자의 눈이 빛의 경로에 정확히 맞았는지 확인 (충돌 감지)
+      const u_y = dir_y / dir_len;
+      const u_z = dir_z / dir_len;
+      const w_y = eyeY - p_s.y;
+      const w_z = eyeZ - p_s.z;
+      const distToRay = Math.abs(w_y * u_z - w_z * u_y); 
+      const isForward = (w_y * u_y + w_z * u_z) > 0; 
+      const isEyeAligned = distToRay < 40 && isForward; 
+
+      // 3D 공간 상의 두 점을 연결하는 선(레이저) 그리기
+      const DrawLine = ({ p1, p2, type }) => {
+        const dx = p2.x - p1.x; const dy = p2.y - p1.y; const dz = p2.z - p1.z;
+        const len = Math.hypot(dx, dy, dz);
+        const rZ = Math.atan2(dy, dx) * 180 / Math.PI;
+        const rY = Math.atan2(dz, Math.hypot(dx, dy)) * 180 / Math.PI;
+        
+        const isVirtual = type === 'virtual';
+        const color = isVirtual ? '#06b6d4' : '#eab308';
+
+        return (
+          <div style={{
+            position: 'absolute', left: 0, top: 0, width: len, height: isVirtual ? 2 : 4,
+            transformOrigin: 'left center',
+            transform: `translate3d(${p1.x}px, ${p1.y}px, ${p1.z}px) rotateZ(${rZ}deg) rotateY(${-rY}deg)`,
+            background: isVirtual 
+              ? `repeating-linear-gradient(90deg, transparent, transparent 4px, ${color} 4px, ${color} 8px)` 
+              : color,
+            boxShadow: isVirtual ? 'none' : `0 0 10px ${color}, 0 0 20px ${color}`,
+            opacity: brightness / 100, zIndex: 50, pointerEvents: 'none', overflow: 'hidden'
           }}>
-            
-            {/* 1. 바닥 눈금 격자판 (XY 평면) */}
-            <div style={{
-              position: 'absolute', width: 1000, height: 1000, left: -500, top: -500,
-              backgroundImage: `linear-gradient(rgba(148, 163, 184, 0.15) 2px, transparent 2px), linear-gradient(90deg, rgba(148, 163, 184, 0.15) 2px, transparent 2px)`,
-              backgroundSize: '50px 50px', pointerEvents: 'none', transform: 'translateZ(-1px)',
-              transformStyle: 'preserve-3d'
-            }} />
-
-            {/* 2. 스마트폰 디스플레이 (XY 평면) */}
-            <div style={{
-              position: 'absolute', width: 300, height: 300, left: -150, top: -150,
-              backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '2px solid #334155',
-              borderRadius: '20px', boxShadow: '0 0 30px rgba(0,0,0,0.5) inset',
-              transformStyle: 'preserve-3d'
-            }} />
-
-            {/* 3. 3D 좌표축 */}
-            <div style={{ position: 'absolute', left: -400, top: -1, width: 800, height: 2, background: 'rgba(239, 68, 68, 0.6)' }} />
-            <div style={{ position: 'absolute', left: 410, top: -12, color: '#ef4444', fontWeight: 'bold', fontSize: '20px', transform: `rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)` }}>X</div>
-            
-            <div style={{ position: 'absolute', left: -1, top: -400, width: 2, height: 800, background: 'rgba(34, 197, 94, 0.6)' }} />
-            <div style={{ position: 'absolute', left: -10, top: 410, color: '#22c55e', fontWeight: 'bold', fontSize: '20px', transform: `rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)` }}>Y</div>
-            
-            {/* Z축은 위로 솟아오름 */}
-            <div style={{ position: 'absolute', left: -1, top: 0, width: 2, height: 400, background: 'rgba(59, 130, 246, 0.6)', transformOrigin: 'top center', transform: 'rotateX(90deg)' }} />
-            <div style={{ position: 'absolute', left: 10, top: -12, transform: `translateZ(410px) rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)`, color: '#3b82f6', fontWeight: 'bold', fontSize: '20px' }}>Z</div>
-
-            {/* 4. 사면체 피라미드 및 이미지 렌더링 */}
-            {[0, 90, 180, 270].map(rz => (
-              <div key={rz} style={{ position: 'absolute', left: 0, top: 0, transformStyle: 'preserve-3d', transform: `rotateZ(${rz}deg)` }}>
-                
-                {/* 바닥의 스마트폰 이미지 (XY평면) - 3D 맥락 강제 유지 */}
+            {!isVirtual && (
                 <div style={{
-                  position: 'absolute', left: -40, top: IMG_R - 40, width: 80, height: 80,
-                  transform: 'rotateZ(180deg)', transformStyle: 'preserve-3d'
-                }}>
-                  <div style={{ fontSize: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: brightness / 100 }}>
-                    {objectType}
-                  </div>
-                </div>
-
-                {/* 3D 사다리꼴 스크린 (CSS 버그 방지를 위해 SVG 도형으로 교체) */}
-                <div style={{
-                  position: 'absolute', left: -80, top: HINGE_R, width: 160, height: FACE_H,
-                  transformOrigin: 'top center', 
-                  transform: `rotateX(${angle}deg)`, // Z축 +방향으로 확실하게 접혀 올라감
-                  transformStyle: 'preserve-3d'
-                }}>
-                  <svg width="100%" height="100%" viewBox="0 0 160 180" style={{ overflow: 'visible', filter: 'drop-shadow(0 0 5px rgba(6,182,212,0.3))' }}>
-                    {/* SVG polygon으로 진짜 사다리꼴을 그려 2D 평면화 버그를 차단합니다 */}
-                    <polygon points="40,0 120,0 160,180 0,180" 
-                             fill="rgba(255, 255, 255, 0.05)" 
-                             stroke="rgba(6, 182, 212, 0.6)" 
-                             strokeWidth="2" />
-                  </svg>
-                </div>
-
-                {/* 허공의 홀로그램 허상 - 3D 맥락 강제 유지 */}
-                <div style={{
-                  position: 'absolute', left: -40, top: HINGE_R, width: 80, height: 80,
-                  transformOrigin: 'top center',
-                  transform: `rotateX(${2 * angle}deg) translateY(${IMG_R - HINGE_R}px) scaleY(-1)`, // Z축 +방향으로 기립하도록 수정
-                  transformStyle: 'preserve-3d' // 이 속성이 있어야 2D로 납작해지지 않음
-                }}>
-                  <div style={{
-                    width: '100%', height: '100%',
-                    fontSize: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center',
-                    opacity: (brightness / 100) * 0.85, 
-                    filter: 'drop-shadow(0 0 15px rgba(6, 182, 212, 0.8))',
-                  }}>
-                    {objectType}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* 5. 빛의 경로 (정면 Y축 기준 하나만 표시) */}
-            {showRays && (
-              <>
-                <DrawLine p1={p_img} p2={p_s} type="actual" /> {/* 광원 -> 스크린 (수직 상승) */}
-                <DrawLine p1={p_s} p2={p_reflect} type="actual" /> {/* 스크린 -> 반사된 직선 경로 */}
-                <DrawLine p1={p_v} p2={p_s} type="virtual" /> {/* 허상 -> 스크린 (점선) */}
-
-                {/* 관찰자의 눈 */}
-                <div style={{
-                  position: 'absolute', left: -30, top: -30, width: 60, height: 60,
-                  transform: `translate3d(${p_eye.x}px, ${p_eye.y}px, ${p_eye.z}px) rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)`,
-                  transformStyle: 'preserve-3d', zIndex: 60, pointerEvents: 'none',
-                  transition: 'transform 0.1s ease-out'
-                }}>
-                  <div style={{
-                    fontSize: '50px', textAlign: 'center', lineHeight: '60px',
-                    textShadow: isEyeAligned ? '0 0 40px rgba(34, 197, 94, 1)' : '0 0 20px rgba(234, 179, 8, 0.8)',
-                    transform: isEyeAligned ? 'scale(1.2)' : 'scale(1)',
-                    transition: 'all 0.3s ease-out'
-                  }}>👀</div>
-                  <div className={`absolute top-14 left-1/2 -translate-x-1/2 text-sm font-bold px-3 py-1 rounded-full whitespace-nowrap transition-colors ${isEyeAligned ? 'text-green-300 bg-green-900/90 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'text-yellow-400 bg-black/50'}`}>
-                    {isEyeAligned ? '✨ 시야 확보! ✨' : '관찰자'}
-                  </div>
-                </div>
-              </>
+                  position: 'absolute', left: 0, top: -2, width: 20, height: '200%',
+                  backgroundColor: '#ffffff', borderRadius: '50%',
+                  boxShadow: '0 0 15px 5px rgba(255,255,255,1)',
+                  animation: 'photonMove 1s infinite linear'
+                }} />
             )}
           </div>
-        </div>
-      </div>
+        );
+      };
 
-      {/* 오른쪽: 컨트롤 패널 */}
-      <div className="w-full lg:w-[400px] bg-slate-900 border-l border-slate-800 flex flex-col h-full overflow-y-auto shadow-2xl z-20">
-        <div className="p-6 border-b border-slate-800 bg-slate-900/50">
-          <h2 className="text-xl font-bold flex items-center gap-2 mb-4 text-blue-400">
-            <Info className="w-6 h-6" />
-            3D 공간 추론 미션
-          </h2>
-          <div className={`p-5 rounded-xl border-2 transition-all duration-300 shadow-inner ${isOptimal ? 'bg-green-950/40 border-green-700/50' : 'bg-slate-800 border-slate-700'}`}>
-            <p className="text-sm text-slate-300 mb-3 leading-relaxed">
-              디스플레이(XY 평면)에서 <strong>수직(+Z 방향)</strong>으로 쏘아 올려진 빛이 사다리꼴 스크린에 반사됩니다. <br/>
-              관찰자 눈(👀)을 움직여 빛의 경로에 맞추고, 홀로그램이 바르게 서도록 각도를 45도로 조절하세요!
-            </p>
-            <div className="mt-4 flex items-center justify-between bg-black/20 p-3 rounded-lg border border-white/5">
-              <span className="text-slate-400 font-sans text-sm">현재 반사된 허상의 각도:</span>
-              <span className={`text-2xl font-bold ${isOptimal ? 'text-green-400' : 'text-amber-400'}`}>
-                {angle * 2}°
-              </span>
+      return (
+        <div className="flex flex-col lg:flex-row h-screen w-full bg-slate-950 text-slate-100 select-none" style={{ fontFamily: '"Jua", sans-serif' }}>
+          <style>
+            {`
+              @keyframes photonMove { 0% { left: -20px; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
+              .canvas-container:active { cursor: grabbing !important; }
+            `}
+          </style>
+          
+          {/* 왼쪽: 3D 시뮬레이션 영역 */}
+          <div className="flex-1 p-4 flex flex-col items-center justify-center relative overflow-hidden">
+            <div className="absolute top-4 left-4 z-20 flex gap-2">
+              <button onClick={setViewFront} className="bg-slate-800 hover:bg-cyan-900 border border-slate-700 text-cyan-400 px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg transition-colors">
+                <Camera className="w-5 h-5" /> 정면(Z축)에서 보기
+              </button>
+              <button onClick={setViewTop} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg transition-colors">
+                <Rotate3D className="w-5 h-5" /> 대각선 초기 시점
+              </button>
+            </div>
+
+            <div 
+              className="canvas-container relative w-full h-full max-h-[800px] max-w-5xl rounded-2xl shadow-2xl shadow-cyan-900/20 border-2 border-slate-800 bg-slate-900 flex items-center justify-center overflow-hidden cursor-grab" 
+              style={{ perspective: '1200px' }}
+              onMouseDown={handlePointerDown} onMouseMove={handlePointerMove} onMouseUp={handlePointerUp} onMouseLeave={handlePointerUp}
+              onTouchStart={handlePointerDown} onTouchMove={handlePointerMove} onTouchEnd={handlePointerUp}
+            >
+              {/* 🌐 World Container (XY 평면 기반) 🌐 */}
+              <div style={{ 
+                position: 'absolute', top: '50%', left: '50%', width: 0, height: 0,
+                transformStyle: 'preserve-3d',
+                transform: `rotateX(${rotX}deg) rotateZ(${rotZ}deg)`, // XY 바닥면 회전
+                transition: isDragging ? 'none' : 'transform 0.3s ease-out'
+              }}>
+                
+                {/* 1. 바닥 눈금 격자판 (XY 평면) */}
+                <div style={{
+                  position: 'absolute', width: 1000, height: 1000, left: -500, top: -500,
+                  backgroundImage: `linear-gradient(rgba(148, 163, 184, 0.15) 2px, transparent 2px), linear-gradient(90deg, rgba(148, 163, 184, 0.15) 2px, transparent 2px)`,
+                  backgroundSize: '50px 50px', pointerEvents: 'none', transform: 'translateZ(-1px)',
+                  transformStyle: 'preserve-3d'
+                }} />
+
+                {/* 2. 스마트폰 디스플레이 (XY 평면) */}
+                <div style={{
+                  position: 'absolute', width: 300, height: 300, left: -150, top: -150,
+                  backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '2px solid #334155',
+                  borderRadius: '20px', boxShadow: '0 0 30px rgba(0,0,0,0.5) inset',
+                  transformStyle: 'preserve-3d'
+                }} />
+
+                {/* 3. 3D 좌표축 */}
+                <div style={{ position: 'absolute', left: -400, top: -1, width: 800, height: 2, background: 'rgba(239, 68, 68, 0.6)' }} />
+                <div style={{ position: 'absolute', left: 410, top: -12, color: '#ef4444', fontWeight: 'bold', fontSize: '20px', transform: `rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)` }}>X</div>
+                
+                <div style={{ position: 'absolute', left: -1, top: -400, width: 2, height: 800, background: 'rgba(34, 197, 94, 0.6)' }} />
+                <div style={{ position: 'absolute', left: -10, top: 410, color: '#22c55e', fontWeight: 'bold', fontSize: '20px', transform: `rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)` }}>Y</div>
+                
+                {/* Z축은 위로 솟아오름 */}
+                <div style={{ position: 'absolute', left: -1, top: 0, width: 2, height: 400, background: 'rgba(59, 130, 246, 0.6)', transformOrigin: 'top center', transform: 'rotateX(90deg)' }} />
+                <div style={{ position: 'absolute', left: 10, top: -12, transform: `translateZ(410px) rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)`, color: '#3b82f6', fontWeight: 'bold', fontSize: '20px' }}>Z</div>
+
+                {/* 4. 사면체 피라미드 및 이미지 렌더링 */}
+                {[0, 90, 180, 270].map(rz => (
+                  <div key={rz} style={{ position: 'absolute', left: 0, top: 0, transformStyle: 'preserve-3d', transform: `rotateZ(${rz}deg)` }}>
+                    
+                    {/* 바닥의 스마트폰 이미지 (XY평면) - 3D 맥락 강제 유지 */}
+                    <div style={{
+                      position: 'absolute', left: -40, top: IMG_R - 40, width: 80, height: 80,
+                      transform: 'rotateZ(180deg)', transformStyle: 'preserve-3d'
+                    }}>
+                      <div style={{ fontSize: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: brightness / 100 }}>
+                        {objectType}
+                      </div>
+                    </div>
+
+                    {/* 3D 사다리꼴 스크린 (CSS 버그 방지를 위해 SVG 도형으로 교체) */}
+                    <div style={{
+                      position: 'absolute', left: -80, top: HINGE_R, width: 160, height: FACE_H,
+                      transformOrigin: 'top center', 
+                      transform: `rotateX(${angle}deg)`, // Z축 +방향으로 확실하게 접혀 올라감
+                      transformStyle: 'preserve-3d'
+                    }}>
+                      <svg width="100%" height="100%" viewBox="0 0 160 180" style={{ overflow: 'visible', filter: 'drop-shadow(0 0 5px rgba(6,182,212,0.3))' }}>
+                        {/* SVG polygon으로 진짜 사다리꼴을 그려 2D 평면화 버그를 차단합니다 */}
+                        <polygon points="40,0 120,0 160,180 0,180" 
+                                fill="rgba(255, 255, 255, 0.05)" 
+                                stroke="rgba(6, 182, 212, 0.6)" 
+                                strokeWidth="2" />
+                      </svg>
+                    </div>
+
+                    {/* 허공의 홀로그램 허상 - 3D 맥락 강제 유지 */}
+                    <div style={{
+                      position: 'absolute', left: -40, top: HINGE_R, width: 80, height: 80,
+                      transformOrigin: 'top center',
+                      transform: `rotateX(${2 * angle}deg) translateY(${IMG_R - HINGE_R}px) scaleY(-1)`, // Z축 +방향으로 기립하도록 수정
+                      transformStyle: 'preserve-3d' // 이 속성이 있어야 2D로 납작해지지 않음
+                    }}>
+                      <div style={{
+                        width: '100%', height: '100%',
+                        fontSize: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                        opacity: (brightness / 100) * 0.85, 
+                        filter: 'drop-shadow(0 0 15px rgba(6, 182, 212, 0.8))',
+                      }}>
+                        {objectType}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {/* 5. 빛의 경로 (정면 Y축 기준 하나만 표시) */}
+                {showRays && (
+                  <>
+                    <DrawLine p1={p_img} p2={p_s} type="actual" /> {/* 광원 -> 스크린 (수직 상승) */}
+                    <DrawLine p1={p_s} p2={p_reflect} type="actual" /> {/* 스크린 -> 반사된 직선 경로 */}
+                    <DrawLine p1={p_v} p2={p_s} type="virtual" /> {/* 허상 -> 스크린 (점선) */}
+
+                    {/* 관찰자의 눈 */}
+                    <div style={{
+                      position: 'absolute', left: -30, top: -30, width: 60, height: 60,
+                      transform: `translate3d(${p_eye.x}px, ${p_eye.y}px, ${p_eye.z}px) rotateZ(${-rotZ}deg) rotateX(${-rotX}deg)`,
+                      transformStyle: 'preserve-3d', zIndex: 60, pointerEvents: 'none',
+                      transition: 'transform 0.1s ease-out'
+                    }}>
+                      <div style={{
+                        fontSize: '50px', textAlign: 'center', lineHeight: '60px',
+                        textShadow: isEyeAligned ? '0 0 40px rgba(34, 197, 94, 1)' : '0 0 20px rgba(234, 179, 8, 0.8)',
+                        transform: isEyeAligned ? 'scale(1.2)' : 'scale(1)',
+                        transition: 'all 0.3s ease-out'
+                      }}>👀</div>
+                      <div className={`absolute top-14 left-1/2 -translate-x-1/2 text-sm font-bold px-3 py-1 rounded-full whitespace-nowrap transition-colors ${isEyeAligned ? 'text-green-300 bg-green-900/90 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'text-yellow-400 bg-black/50'}`}>
+                        {isEyeAligned ? '✨ 시야 확보! ✨' : '관찰자'}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="p-6 flex-1 flex flex-col gap-8">
-          {/* 스크린 기울기 조절 */}
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <label className="text-lg font-medium flex items-center gap-2 text-slate-200">
-                <TriangleRight className="w-5 h-5 text-cyan-400" />
-                사다리꼴 스크린 각도
-              </label>
-              <span className="font-mono text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-lg border border-cyan-400/20 shadow-inner">
-                {angle}°
-              </span>
-            </div>
-            <input type="range" min="20" max="70" value={angle} onChange={(e) => setAngle(Number(e.target.value))}
-              className="w-full h-3 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
-            <div className="flex justify-between text-xs text-slate-500 font-mono">
-              <span>20°</span><span className="text-green-500 font-bold text-sm">45°</span><span>70°</span>
-            </div>
-          </div>
-
-          {/* 빛의 경로 토글 */}
-          <button onClick={() => setShowRays(!showRays)}
-            className={`w-full p-4 rounded-xl text-md font-bold flex items-center justify-center gap-3 transition-all ${
-              showRays ? 'bg-yellow-500/20 border-2 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.2)]' : 'bg-slate-800 border-2 border-slate-700 text-slate-400 hover:bg-slate-700'
-            }`}>
-            <Eye className="w-5 h-5" /> {showRays ? '빛의 경로 (Ray Tracing) 끄기' : '👀 빛의 경로 및 시선 보기'}
-          </button>
-
-          {/* 관찰자 시점 조절 (새로 추가됨) */}
-          {showRays && (
-            <div className="space-y-4 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
-              <h3 className="text-lg font-medium flex items-center gap-2 text-slate-200 mb-2">
-                <UserCircle className="w-5 h-5 text-emerald-400" />
-                관찰자 눈(👀) 위치 조절
-              </h3>
-              
-              {/* 눈의 거리 (Y축) */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm font-medium text-slate-300">
-                  <span>스크린과의 거리 (Y축)</span>
-                  <span className="font-mono text-emerald-400">{eyeY}</span>
+          {/* 오른쪽: 컨트롤 패널 */}
+          <div className="w-full lg:w-[400px] bg-slate-900 border-l border-slate-800 flex flex-col h-full overflow-y-auto shadow-2xl z-20">
+            <div className="p-6 border-b border-slate-800 bg-slate-900/50">
+              <h2 className="text-xl font-bold flex items-center gap-2 mb-4 text-blue-400">
+                <Info className="w-6 h-6" />
+                3D 공간 추론 미션
+              </h2>
+              <div className={`p-5 rounded-xl border-2 transition-all duration-300 shadow-inner ${isOptimal ? 'bg-green-950/40 border-green-700/50' : 'bg-slate-800 border-slate-700'}`}>
+                <p className="text-sm text-slate-300 mb-3 leading-relaxed">
+                  디스플레이(XY 평면)에서 <strong>수직(+Z 방향)</strong>으로 쏘아 올려진 빛이 사다리꼴 스크린에 반사됩니다. <br/>
+                  관찰자 눈(👀)을 움직여 빛의 경로에 맞추고, 홀로그램이 바르게 서도록 각도를 45도로 조절하세요!
+                </p>
+                <div className="mt-4 flex items-center justify-between bg-black/20 p-3 rounded-lg border border-white/5">
+                  <span className="text-slate-400 font-sans text-sm">현재 반사된 허상의 각도:</span>
+                  <span className={`text-2xl font-bold ${isOptimal ? 'text-green-400' : 'text-amber-400'}`}>
+                    {angle * 2}°
+                  </span>
                 </div>
-                <input type="range" min="100" max="400" value={eyeY} onChange={(e) => setEyeY(Number(e.target.value))}
-                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+              </div>
+            </div>
+
+            <div className="p-6 flex-1 flex flex-col gap-8">
+              {/* 스크린 기울기 조절 */}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <label className="text-lg font-medium flex items-center gap-2 text-slate-200">
+                    <TriangleRight className="w-5 h-5 text-cyan-400" />
+                    사다리꼴 스크린 각도
+                  </label>
+                  <span className="font-mono text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-lg border border-cyan-400/20 shadow-inner">
+                    {angle}°
+                  </span>
+                </div>
+                <input type="range" min="20" max="70" value={angle} onChange={(e) => setAngle(Number(e.target.value))}
+                  className="w-full h-3 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" />
+                <div className="flex justify-between text-xs text-slate-500 font-mono">
+                  <span>20°</span><span className="text-green-500 font-bold text-sm">45°</span><span>70°</span>
+                </div>
               </div>
 
-              {/* 눈의 높이 (Z축) */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm font-medium text-slate-300">
-                  <span>바닥에서의 높이 (Z축)</span>
-                  <span className="font-mono text-emerald-400">{eyeZ}</span>
+              {/* 빛의 경로 토글 */}
+              <button onClick={() => setShowRays(!showRays)}
+                className={`w-full p-4 rounded-xl text-md font-bold flex items-center justify-center gap-3 transition-all ${
+                  showRays ? 'bg-yellow-500/20 border-2 border-yellow-400 text-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.2)]' : 'bg-slate-800 border-2 border-slate-700 text-slate-400 hover:bg-slate-700'
+                }`}>
+                <Eye className="w-5 h-5" /> {showRays ? '빛의 경로 (Ray Tracing) 끄기' : '👀 빛의 경로 및 시선 보기'}
+              </button>
+
+              {/* 관찰자 시점 조절 (새로 추가됨) */}
+              {showRays && (
+                <div className="space-y-4 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
+                  <h3 className="text-lg font-medium flex items-center gap-2 text-slate-200 mb-2">
+                    <UserCircle className="w-5 h-5 text-emerald-400" />
+                    관찰자 눈(👀) 위치 조절
+                  </h3>
+                  
+                  {/* 눈의 거리 (Y축) */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm font-medium text-slate-300">
+                      <span>스크린과의 거리 (Y축)</span>
+                      <span className="font-mono text-emerald-400">{eyeY}</span>
+                    </div>
+                    <input type="range" min="100" max="400" value={eyeY} onChange={(e) => setEyeY(Number(e.target.value))}
+                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                  </div>
+
+                  {/* 눈의 높이 (Z축) */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm font-medium text-slate-300">
+                      <span>바닥에서의 높이 (Z축)</span>
+                      <span className="font-mono text-emerald-400">{eyeZ}</span>
+                    </div>
+                    <input type="range" min="0" max="300" value={eyeZ} onChange={(e) => setEyeZ(Number(e.target.value))}
+                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                  </div>
                 </div>
-                <input type="range" min="0" max="300" value={eyeZ} onChange={(e) => setEyeZ(Number(e.target.value))}
-                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+              )}
+
+              {/* 홀로그램 종류 선택 */}
+              <div className="space-y-4">
+                <label className="text-lg font-medium flex items-center gap-2 text-slate-200"><ImageIcon className="w-5 h-5 text-cyan-400" /> 홀로그램 종류</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[ { l: '나비', i: '🦋' }, { l: '공룡', i: '🦖' }, { l: '번개', i: '⚡' }, { l: '유령', i: '👻' }].map((obj) => (
+                    <button key={obj.l} onClick={() => setObjectType(obj.i)}
+                      className={`p-3 rounded-xl text-3xl flex flex-col items-center justify-center transition-all shadow-md ${
+                        objectType === obj.i ? 'bg-cyan-500/20 border-2 border-cyan-400 text-cyan-400 scale-105' : 'bg-slate-800 border-2 border-slate-700 text-slate-400'
+                      }`}>
+                      <span>{obj.i}</span><span className="text-xs mt-1">{obj.l}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 밝기 조절 */}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <label className="text-lg font-medium flex items-center gap-2 text-slate-200"><Lightbulb className="w-5 h-5 text-yellow-400" /> 디스플레이 밝기</label>
+                  <span className="font-mono text-yellow-400 bg-yellow-400/10 px-3 py-1 rounded-lg border border-yellow-400/20 shadow-inner">{brightness}%</span>
+                </div>
+                <input type="range" min="0" max="100" value={brightness} onChange={(e) => setBrightness(Number(e.target.value))}
+                  className="w-full h-3 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
               </div>
             </div>
-          )}
-
-          {/* 홀로그램 종류 선택 */}
-          <div className="space-y-4">
-            <label className="text-lg font-medium flex items-center gap-2 text-slate-200"><ImageIcon className="w-5 h-5 text-cyan-400" /> 홀로그램 종류</label>
-            <div className="grid grid-cols-4 gap-2">
-              {[ { l: '나비', i: '🦋' }, { l: '공룡', i: '🦖' }, { l: '번개', i: '⚡' }, { l: '유령', i: '👻' }].map((obj) => (
-                <button key={obj.l} onClick={() => setObjectType(obj.i)}
-                  className={`p-3 rounded-xl text-3xl flex flex-col items-center justify-center transition-all shadow-md ${
-                    objectType === obj.i ? 'bg-cyan-500/20 border-2 border-cyan-400 text-cyan-400 scale-105' : 'bg-slate-800 border-2 border-slate-700 text-slate-400'
-                  }`}>
-                  <span>{obj.i}</span><span className="text-xs mt-1">{obj.l}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 밝기 조절 */}
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <label className="text-lg font-medium flex items-center gap-2 text-slate-200"><Lightbulb className="w-5 h-5 text-yellow-400" /> 디스플레이 밝기</label>
-              <span className="font-mono text-yellow-400 bg-yellow-400/10 px-3 py-1 rounded-lg border border-yellow-400/20 shadow-inner">{brightness}%</span>
-            </div>
-            <input type="range" min="0" max="100" value={brightness} onChange={(e) => setBrightness(Number(e.target.value))}
-              className="w-full h-3 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
